@@ -1,1 +1,252 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KH Coach</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#111111">
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:16px;line-height:1.35}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:end}
+    label{display:block;font-size:12px;opacity:.8;margin-bottom:6px}
+    input,select,button{font-size:16px;padding:10px;border:1px solid #ccc;border-radius:10px}
+    button{cursor:pointer}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{border-bottom:1px solid #eee;padding:10px;text-align:left;vertical-align:top}
+    .pill{display:inline-block;padding:6px 10px;border-radius:999px;font-weight:600}
+    .green{background:#e7f6ec;color:#176b2c}
+    .amber{background:#fff3d6;color:#7a4a00}
+    .red{background:#ffe2e2;color:#8a1414}
+    small{opacity:.75}
+    .box{border:1px solid #eee;border-radius:14px;padding:14px;margin-top:12px}
+  </style>
+</head>
+<body>
+  <h2>KH Coach</h2>
 
+  <div class="box">
+    <div class="row">
+      <div>
+        <label>Dropbox share-link naar Excel (direct download link)</label>
+        <input id="dropboxUrl" style="min-width:320px;width:60vw" placeholder="Plak Dropbox link (dl=1)"/>
+        <div><small>Tip: eindig je link op <b>dl=1</b> i.p.v. dl=0</small></div>
+      </div>
+      <button id="loadBtn">Laad food list</button>
+    </div>
+  </div>
+
+  <div class="box">
+    <div class="row">
+      <div>
+        <label>Dagdoel netto KH (g)</label>
+        <input id="target" type="number" value="50" min="0" step="1">
+      </div>
+      <div>
+        <label>Dag totaal (g)</label>
+        <div id="totalPill" class="pill green">0 g</div>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button id="addRowBtn">+ Regel</button>
+        <button id="clearBtn">Leeg</button>
+      </div>
+    </div>
+  </div>
+
+  <table id="planTable" class="box">
+    <thead>
+      <tr>
+        <th style="width:140px">Maaltijd</th>
+        <th>Product</th>
+        <th style="width:120px">Porties</th>
+        <th style="width:140px">Netto KH</th>
+        <th>Notities</th>
+        <th style="width:60px"></th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- xlsx library -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script>
+    let food = []; // {name, carbs, servingOrig}
+    const meals = ["Ontbijt","Tussendoor","Lunch","Tussendoor","Diner","Tussendoor"];
+
+    function setPill(total, target){
+      const pill = document.getElementById("totalPill");
+      pill.textContent = `${total.toFixed(1)} g`;
+      pill.classList.remove("green","amber","red");
+      if (total <= target) pill.classList.add("green");
+      else if (total <= target*1.1) pill.classList.add("amber");
+      else pill.classList.add("red");
+    }
+
+    function calcTotal(){
+      const rows = document.querySelectorAll("#planTable tbody tr");
+      let total = 0;
+      rows.forEach(tr=>{
+        const carbs = parseFloat(tr.querySelector("[data-carbs]").textContent || "0") || 0;
+        total += carbs;
+      });
+      const target = parseFloat(document.getElementById("target").value || "0") || 0;
+      setPill(total, target);
+      localStorage.setItem("kh_plan", JSON.stringify(serializePlan()));
+    }
+
+    function serializePlan(){
+      const rows = [];
+      document.querySelectorAll("#planTable tbody tr").forEach(tr=>{
+        rows.push({
+          meal: tr.querySelector("select").value,
+          product: tr.querySelector("input[list]").value,
+          portions: tr.querySelector("input[type=number]").value,
+          notes: tr.querySelector("input[data-notes]").value
+        });
+      });
+      return rows;
+    }
+
+    function restorePlan(){
+      const saved = localStorage.getItem("kh_plan");
+      if(!saved) return;
+      const rows = JSON.parse(saved);
+      rows.forEach(r=>addRow(r.meal, r.product, r.portions, r.notes));
+      calcTotal();
+    }
+
+    function addRow(meal=meals[0], product="", portions=1, notes=""){
+      const tbody = document.querySelector("#planTable tbody");
+      const tr = document.createElement("tr");
+
+      const mealTd = document.createElement("td");
+      const mealSel = document.createElement("select");
+      meals.forEach(m=>{
+        const opt = document.createElement("option");
+        opt.value = m; opt.textContent = m;
+        mealSel.appendChild(opt);
+      });
+      mealSel.value = meal;
+      mealSel.onchange = calcTotal;
+      mealTd.appendChild(mealSel);
+
+      const prodTd = document.createElement("td");
+      const prodInput = document.createElement("input");
+      prodInput.setAttribute("list","foodList");
+      prodInput.placeholder = "Kies product…";
+      prodInput.value = product;
+      prodInput.oninput = ()=>updateRow(tr);
+      prodTd.appendChild(prodInput);
+
+      const portionsTd = document.createElement("td");
+      const portionsInput = document.createElement("input");
+      portionsInput.type="number"; portionsInput.min="0"; portionsInput.step="0.5";
+      portionsInput.value = portions;
+      portionsInput.oninput = ()=>updateRow(tr);
+      portionsTd.appendChild(portionsInput);
+
+      const carbsTd = document.createElement("td");
+      carbsTd.setAttribute("data-carbs","1");
+      carbsTd.textContent = "0";
+
+      const notesTd = document.createElement("td");
+      const notesInput = document.createElement("input");
+      notesInput.setAttribute("data-notes","1");
+      notesInput.placeholder="Notities…";
+      notesInput.value = notes;
+      notesInput.oninput = calcTotal;
+      notesTd.appendChild(notesInput);
+
+      const delTd = document.createElement("td");
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "✕";
+      delBtn.onclick = ()=>{ tr.remove(); calcTotal(); };
+      delTd.appendChild(delBtn);
+
+      tr.appendChild(mealTd);
+      tr.appendChild(prodTd);
+      tr.appendChild(portionsTd);
+      tr.appendChild(carbsTd);
+      tr.appendChild(notesTd);
+      tr.appendChild(delTd);
+      tbody.appendChild(tr);
+
+      updateRow(tr);
+    }
+
+    function updateRow(tr){
+      const prod = tr.querySelector("input[list]").value.trim();
+      const portions = parseFloat(tr.querySelector("input[type=number]").value || "0") || 0;
+      const match = food.find(x=>x.name === prod);
+      const carbsPerPortion = match ? match.carbs : 0;
+      const total = carbsPerPortion * portions;
+      tr.querySelector("[data-carbs]").textContent = total ? total.toFixed(1) : "0";
+      calcTotal();
+    }
+
+    async function loadFromDropbox(){
+      const url = document.getElementById("dropboxUrl").value.trim();
+      if(!url){ alert("Plak je Dropbox-link naar het Excelbestand."); return; }
+      localStorage.setItem("kh_dropbox_url", url);
+
+      const res = await fetch(url);
+      if(!res.ok){ alert("Kon Excel niet laden. Controleer de Dropbox link (dl=1) en permissies."); return; }
+      const ab = await res.arrayBuffer();
+      const wb = XLSX.read(ab, {type:"array"});
+      const sheetName = wb.SheetNames.find(n=>n.toLowerCase().includes("foodlist")) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const json = XLSX.utils.sheet_to_json(ws, {defval:""});
+      // verwacht kolommen: Product (NL) en Netto KH (g) en Portie (origineel)
+      food = json
+        .filter(r => r["Product (NL)"] && r["Netto KH (g)"] !== "")
+        .map(r => ({
+          name: String(r["Product (NL)"]).trim(),
+          carbs: parseFloat(r["Netto KH (g)"]) || 0,
+          servingOrig: String(r["Portie (origineel)"]||"").trim()
+        }))
+        .sort((a,b)=>a.name.localeCompare(b.name,"nl"));
+
+      let dl = document.getElementById("foodList");
+      if(!dl){
+        dl = document.createElement("datalist");
+        dl.id="foodList";
+        document.body.appendChild(dl);
+      }
+      dl.innerHTML = "";
+      food.forEach(f=>{
+        const opt = document.createElement("option");
+        opt.value = f.name;
+        opt.label = f.servingOrig ? `${f.servingOrig} · ${f.carbs} g` : `${f.carbs} g`;
+        dl.appendChild(opt);
+      });
+
+      alert(`Food list geladen: ${food.length} items.`);
+      // update existing rows
+      document.querySelectorAll("#planTable tbody tr").forEach(tr=>updateRow(tr));
+    }
+
+    document.getElementById("loadBtn").onclick = loadFromDropbox;
+    document.getElementById("addRowBtn").onclick = ()=>addRow(meals[document.querySelectorAll("#planTable tbody tr").length % meals.length]);
+    document.getElementById("clearBtn").onclick = ()=>{
+      if(confirm("Alles wissen?")){
+        document.querySelector("#planTable tbody").innerHTML="";
+        localStorage.removeItem("kh_plan");
+        calcTotal();
+      }
+    };
+    document.getElementById("target").oninput = calcTotal;
+
+    // init
+    const savedUrl = localStorage.getItem("kh_dropbox_url");
+    if(savedUrl) document.getElementById("dropboxUrl").value = savedUrl;
+    addRow();
+    restorePlan();
+
+    // PWA
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./sw.js").catch(()=>{});
+    }
+  </script>
+</body>
+</html>
